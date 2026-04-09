@@ -1,381 +1,161 @@
-# 📄 Distributed KV Store (Raft)
+# DECISION_AGENT.md — RaftLite Project Agent (Production-Ready)
 
-## Decision + Architecture + Execution Document
+## 1. Project Overview
 
----
+**Project Name:** RaftLite
+**Tagline:** A fault-tolerant, Raft-based distributed key-value store with multi-node replication and AI-driven anomaly detection.
 
-# 1. PROJECT NAME
+**Mission:** Build a multi-node KV store that guarantees **strong consistency**, survives **node failures and network partitions**, and provides **real-time anomaly detection** on replication logs.
 
-## **RaftLite**
+**Non-Goals:**
 
-**Tagline:**
-
-> A minimal, fault-tolerant distributed key-value store built on Raft consensus.
-
-Alternative (if you want stronger branding):
-
-## **ConsenStore**
-
-> Consensus-driven distributed KV store
-
-Pick one and stick with it. Don’t rename later.
+* Competing with Redis or etcd performance
+* Full SQL/database features
 
 ---
 
-# 2. PROBLEM DEFINITION
+## 2. Technical Vision
 
-Single-node databases fail:
+### 2.1 Core System
 
-* data loss on crash
-* no availability
-* no consistency across replicas
+| Component                  | Language | Responsibility                                                |
+| -------------------------- | -------- | ------------------------------------------------------------- |
+| Raft Node + KV Store       | Go       | Leader/follower logic, Raft log replication, commit safety    |
+| Distributed Pipeline       | Rust     | High-throughput replication log collection, metrics streaming |
+| AI Anomaly Detection       | Python   | Detect anomalies in replication patterns and latency          |
+| CLI Client                 | Go       | Minimal `PUT/GET/DELETE` commands                             |
+| Tests / Failure Simulation | Go       | Node crash, network partition, slow node, concurrency         |
 
-### Real Problem:
+**Design Principles:**
 
-> How do multiple nodes agree on a consistent state despite failures?
-
-This is the **core distributed systems problem**.
-
----
-
-# 3. OBJECTIVE
-
-Build a system that:
-
-1. Stores key-value data
-2. Replicates state across nodes
-3. Maintains consistency using Raft
-4. Survives node failures
+* **Correctness > performance:** All committed entries must replicate to a majority.
+* **Simulation > assumptions:** All failure scenarios are tested.
+* **Modular architecture:** Easy extension, debugging, and observability.
+* **Persistence & snapshotting:** Raft logs persist to disk, with snapshots for memory efficiency.
 
 ---
 
-# 4. NON-GOALS (CRITICAL)
+## 3. Core Features
 
-Do NOT try to:
+1. **Raft Consensus**
 
-* compete with Redis
-* match etcd performance
-* build full SQL/database features
+   * Leader election: timeout-based, randomized timers, majority vote
+   * Log replication: append-only, followers reject inconsistent entries
+   * Commit rule: majority quorum
+   * Safety: no split-brain, logs never diverge
 
-Focus:
+2. **KV Store**
 
-> correctness + consensus, not features
+   * In-memory + disk-backed persistence
+   * Supports `PUT`, `GET`, `DELETE`
+   * Snapshotting: periodically compacts logs to disk for memory efficiency
 
----
+3. **Distributed Pipeline (Rust)**
 
-# 5. CORE CONCEPT (UNDERSTAND THIS OR FAIL)
+   * Collects replication logs from all nodes
+   * Streams metrics and anomalies to AI module
+   * Handles backpressure and network delays
 
-## Raft guarantees:
+4. **AI Observability (Python)**
 
-* One leader at a time
-* Log replication
-* Majority agreement
+   * Real-time anomaly detection (latency spikes, replication inconsistencies)
+   * Supports both supervised and unsupervised models
+   * Alerts or logs anomalous events
 
-If you don’t deeply understand this, stop and study first.
+5. **Failure Handling**
 
----
-
-# 6. SYSTEM ARCHITECTURE
-
-## High-Level
-
-```id="k6f4a1"
-[ Client ]
-     ↓
-[ Leader Node ]
-     ↓
-[ Follower Nodes ]
-     ↓
-[ Replicated Log ]
-     ↓
-[ State Machine (KV Store) ]
-```
+   * Node crash → automatic leader election
+   * Network partition → quorum enforced, split-brain avoided
+   * Slow nodes → delayed replication handled safely, metrics logged
 
 ---
 
-## Components
+## 4. Cross-Language Integration
 
-### 6.1 Node
-
-Each node contains:
-
-* Raft state
-* Log
-* KV store
-* RPC server
+* **Go ↔ Rust:** gRPC streams for replication logs from Go nodes to Rust pipeline
+* **Rust ↔ Python:** REST/gRPC interface or shared Kafka topic for metrics to AI module
+* **Deployment:** Docker Compose / Kubernetes for orchestrating multi-language cluster
+* **Monitoring:** Central logging service to capture replication events for AI analysis
 
 ---
 
-### 6.2 Leader
+## 5. Edge Cases and Solutions
 
-Responsibilities:
-
-* Accept client requests
-* Append to log
-* Replicate to followers
-
----
-
-### 6.3 Followers
-
-Responsibilities:
-
-* Receive log entries
-* Apply them in order
+| Edge Case                             | Solution                                                            |
+| ------------------------------------- | ------------------------------------------------------------------- |
+| Node crash during partial replication | Leader retries replication; majority quorum ensures commit safety   |
+| Network partition                     | Only majority cluster can commit entries; minority waits            |
+| Split vote in election                | Randomized timeouts and election retries prevent deadlock           |
+| Slow nodes                            | Backpressure and retries; metrics logged for AI detection           |
+| Log growth                            | Periodic snapshotting and log compaction                            |
+| Concurrent client writes              | Leader serializes writes; followers apply in order                  |
+| Node recovery                         | Persisted Raft logs + snapshots enable resynchronization            |
+| Pipeline overload                     | Rust handles backpressure; metrics queue buffered, alerts generated |
 
 ---
 
-### 6.4 State Machine
+## 6. Implementation Roadmap
 
-* Applies committed log entries
-* Stores:
-
-  * key → value
-
----
-
-# 7. RAFT IMPLEMENTATION (NON-NEGOTIABLE)
-
----
-
-## 7.1 Leader Election
-
-* Timeout-based election
-* Randomized timers
-* Majority vote wins
-
-Failure case:
-
-* split vote → retry
+| Phase   | Timeline | Deliverables                                                                         |
+| ------- | -------- | ------------------------------------------------------------------------------------ |
+| Phase 1 | Week 1–2 | Single-node KV store, basic CLI API                                                  |
+| Phase 2 | Week 3–4 | Multi-node RPC, heartbeats, followers                                                |
+| Phase 3 | Week 5–6 | Leader election, Raft state machine                                                  |
+| Phase 4 | Week 7–8 | Log replication, commit logic, snapshotting, state machine                           |
+| Phase 5 | Week 9   | Failure simulations (node crash, partition, slow nodes, concurrency)                 |
+| Phase 6 | Week 10+ | Rust pipeline, Python AI anomaly detection, optimizations, monitoring, documentation |
 
 ---
 
-## 7.2 Log Replication
+## 7. Success Metrics
 
-Leader:
-
-* sends AppendEntries RPC
-  Followers:
-* accept if consistent
-
----
-
-## 7.3 Safety
-
-* Logs must not diverge
-* Followers reject inconsistent entries
+* Cluster survives leader crash and network partitions without data loss
+* Logs replicate consistently across all nodes
+* AI pipeline detects anomalies in real time
+* Minimal CLI fully functional (`PUT/GET/DELETE`)
+* System is modular, testable, and maintainable
 
 ---
 
-## 7.4 Commit Rule
+## 8. Repository Structure
 
-Entry is committed when:
-
-* replicated on majority of nodes
-
----
-
-# 8. CLIENT API
-
-Keep it minimal:
-
-```id="a1x8kq"
-PUT key value
-GET key
-DELETE key
-```
-
-Leader handles all writes.
-
----
-
-# 9. FAILURE HANDLING (THIS DEFINES QUALITY)
-
-You must simulate:
-
-### Node crash
-
-* kill leader
-* ensure new leader election
-
-### Network partition
-
-* split cluster
-* ensure no split-brain
-
-### Slow nodes
-
-* delayed replication
-
-If you skip this → project is fake.
-
----
-
-# 10. IMPLEMENTATION PLAN
-
----
-
-## Phase 1 (Week 1–2)
-
-* Single-node KV store
-* Basic API
-
----
-
-## Phase 2 (Week 3–4)
-
-* Multi-node communication (RPC)
-* Heartbeats
-
----
-
-## Phase 3 (Week 5–6)
-
-* Leader election
-* Basic Raft state
-
----
-
-## Phase 4 (Week 7–8)
-
-* Log replication
-* Commit logic
-
----
-
-## Phase 5 (Week 9)
-
-* Failure simulation
-
----
-
-## Phase 6 (Week 10+)
-
-* Optimization + cleanup
-
----
-
-# 11. TECH STACK
-
-Pick ONE:
-
-### Option A (recommended)
-
-* Go (best for concurrency + networking)
-
-### Option B
-
-* Python (faster dev, lower performance)
-
----
-
-# 12. REPO STRUCTURE
-
-```id="d9m2p0"
+```text
 raftlite/
-├── cmd/            # entrypoints
-├── raft/           # core consensus logic
-├── storage/        # KV store
-├── rpc/            # communication layer
-├── client/         # CLI client
-├── tests/          # failure scenarios
-├── docs/
+├── cmd/            # CLI entrypoints
+├── raft/           # Core consensus logic (Go)
+├── storage/        # KV store + snapshots (Go)
+├── rpc/            # Communication layer (Go, gRPC)
+├── pipeline/       # Distributed replication log processing (Rust)
+├── ai/             # Anomaly detection (Python)
+├── client/         # CLI client (Go)
+├── tests/          # Failure simulations & concurrency tests
+├── docs/           # Architecture diagrams & explanations
 └── DECISION_AGENT.md
 ```
 
 ---
 
-# 13. OPEN SOURCE STRATEGY
+## 9. Risk Assessment & Mitigation
 
-## v0.1 (publish here)
-
-* leader election works
-* basic replication
-
-## v0.2
-
-* full log replication
-* stable under node failure
-
-## v0.3
-
-* failure testing + docs
+* **Concurrency bugs:** Automated tests for leader election, replication, multi-client writes
+* **Split-brain:** Enforced majority quorum; partitions cannot commit
+* **Memory / Log growth:** Snapshotting and log compaction
+* **Integration complexity:** Clear gRPC interfaces, Docker/K8s orchestration
+* **AI false positives:** Tuned thresholds, test datasets, metrics validation
+* **Scalability:** Raft limited to ~7 nodes; pipeline designed for horizontal extension
 
 ---
 
-## README MUST INCLUDE
+## 10. Open Source / Iteration Strategy
 
-* Raft explanation (brief, not copied)
-* architecture diagram
-* how to run 3-node cluster
-* demo steps
+* **v0.1:** Leader election + basic replication, CLI API
+* **v0.2:** Full log replication, commit safety, snapshotting, multi-node stability
+* **v0.3:** Rust pipeline + Python AI anomaly detection, failure simulation, monitoring, full documentation
 
----
+**Documentation Requirements:**
 
-# 14. SUCCESS METRICS
-
-Your system works if:
-
-* cluster survives leader crash
-* no data inconsistency
-* logs replicate correctly
-
----
-
-# 15. COMMON FAILURE PATTERNS (YOU WILL HIT THESE)
-
-### 1. Race conditions
-
-→ concurrency bugs everywhere
-
----
-
-### 2. Broken elections
-
-→ multiple leaders
-
----
-
-### 3. Log inconsistency
-
-→ hardest bug class
-
----
-
-### 4. Debugging hell
-
-→ distributed bugs are non-linear
-
----
-
-# 16. CONTRARIAN TRUTH
-
-Most people:
-
-* “implement Raft”
-* but don’t test failure
-
-That’s worthless.
-
----
-
-# 17. FINAL PRINCIPLES
-
-* correctness > speed
-* simulation > assumptions
-* logs > intuition (debug everything)
-
----
-
-# FINAL REALITY CHECK
-
-This project is:
-
-* harder than anything you’ve built
-* slower than you expect
-* more frustrating than you think
-
-But:
-
-> If you finish it properly, it’s one of the strongest signals you can produce.
+* Original Raft explanation
+* Architecture diagrams
+* Steps to run 3-node cluster
+* Demo failure scenarios
 
